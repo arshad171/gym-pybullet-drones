@@ -340,6 +340,82 @@ class BaseAviary(gym.Env):
                     self._groundEffect(clipped_action[i, :], i)
                     self._drag(self.last_clipped_action[i, :], i)
                     self._downwash(i)
+                elif self.PHYSICS == Physics.PYB_PID_OL:
+                    # self._physics(clipped_action[i, :], i)
+
+                    # action = np.array([0.0, 0.0, 1.0])
+
+                    action[0:3] = 0.5 * action[0:3]
+                    # action[3] = 0.1 * (action[3] + 1)
+                    drone_state = self._getDroneStateVector(0)
+                    target_pos = np.array(drone_state[:3]+action[:3])
+
+                    # execute pid (open-loop)
+                    AGGR_PHY_STEPS = 5
+
+                    curr_state = self._getDroneStateVector(0)
+                    rpm, _, _ = self.ctrl.computeControlFromState(
+                        control_timestep=AGGR_PHY_STEPS*self.TIMESTEP,
+                        state=curr_state,
+                        target_pos=target_pos,
+                    )
+                    last_control = np.reshape(rpm, (self.NUM_DRONES, 4))
+                    
+                    for _ in range(AGGR_PHY_STEPS):
+                        self._physics(last_control[i, :], i)
+                        p.stepSimulation(physicsClientId=self.CLIENT)
+
+                elif self.PHYSICS == Physics.PYB_PID_CL:
+                    # calc dist
+                    if self.flip_freq:
+                        if self.flip_freq == -1:
+                            disturbance = self.ext_dist_mag
+                        else:
+                            disturbance = self.ext_dist_mag[self.ext_dist_index, :]
+                            if self.step_counter != 0 and self.step_counter % self.flip_freq == 0:
+                                self.ext_dist_index = (self.ext_dist_index + 1) % self.ext_dist_mag.shape[0]
+                    else:
+                        disturbance = None
+
+                    action[0:3] = 0.05 * action[0:3]
+
+                    # [-1, 1] => [0, 2] => [0, 1] => [0, 0.5]
+                    action[3] = (action[3] + 1) * 0.5 * 0.5
+                    target_vel = action[3] * (np.abs(action[0:3]) > 0.001) * np.sign(action[0:3])
+
+                    drone_state = self._getDroneStateVector(0)
+                    target_pos = np.array(drone_state[0:3]+action[0:3])
+
+                    # save the last state and action
+                    # the error is computed in _computeObs call below (by reading the current state)
+                    if self.ERRORS:
+                        self.last_state_e = drone_state
+                        self.last_action_e = action
+                    
+                    # execute pid (closed-loop)
+                    last_control = None
+                    AGGR_PHY_STEPS = 1
+                    CONTROL_DURATION_SEC = 2
+                    # CONTROL_DURATION_SEC = 100
+                    CONTROL_FREQ = 48
+                    CONTROL_EVERY_N_STEPS = int(np.floor(self.SIM_FREQ / CONTROL_FREQ))
+                    for c in range(0, int(CONTROL_DURATION_SEC * self.SIM_FREQ), AGGR_PHY_STEPS):
+                    # for c in range(0, int(CONTROL_DURATION_SEC * self.SIM_FREQ / CONTROL_FREQ), AGGR_PHY_STEPS):
+                        if c % CONTROL_EVERY_N_STEPS == 0:
+                            # compute the control
+                            curr_state = self._getDroneStateVector(0)
+                            rpm, _, _ = self.ctrl.computeControlFromState(
+                                control_timestep=CONTROL_EVERY_N_STEPS*self.TIMESTEP,
+                                state=curr_state,
+                                target_pos=target_pos,
+                                target_vel=target_vel,
+                            )
+
+                            last_control = np.reshape(rpm, (self.NUM_DRONES, 4))
+                        self._physics(last_control[i, :], i, disturbance=disturbance)
+                        p.stepSimulation(physicsClientId=self.CLIENT)
+                        self._updateAndStoreKinematicInformation()
+                    # ---
             #### PyBullet computes the new state, unless Physics.DYN ###
             if self.PHYSICS != Physics.DYN:
                 p.stepSimulation(physicsClientId=self.CLIENT)
@@ -429,6 +505,22 @@ class BaseAviary(gym.Env):
         in the `reset()` function.
 
         """
+        if self.ADD_STICK:
+            self.STICK_ID = p.loadURDF(pkg_resources.resource_filename('gym_pybullet_drones', 'assets/stick.urdf'),
+                                        # self.INIT_XYZS[0][:] + [0, 0, 0.03],
+                                        self.INIT_XYZS[0][:] + [0, 0, 0.025],
+                                        # [0, 0, 0],
+                                        # p.getQuaternionFromEuler([0, 15 * np.pi/180, 0]),
+                                        p.getQuaternionFromEuler([
+                                            # np.random.randint(-5, 5) * np.pi/180,
+                                            # np.random.randint(-5, 5) * np.pi/180,
+                                            np.random.normal(loc=0, scale=2.5 * np.pi/180),
+                                            np.random.normal(loc=0, scale=2.5 * np.pi/180),
+                                            0
+                                        ]),
+                                        flags = p.URDF_USE_INERTIA_FROM_FILE,
+                                        physicsClientId=self.CLIENT
+                                        )
         #### Initialize/reset counters and zero-valued variables ###
         self.RESET_TIME = time.time()
         self.step_counter = 0
@@ -443,6 +535,10 @@ class BaseAviary(gym.Env):
         self.last_clipped_action = np.zeros((self.NUM_DRONES, 4))
         self.gui_input = np.zeros(4)
         #### Initialize the drones kinemaatic information ##########
+        for i in range(self.NUM_DRONES):
+            self.stick_pos = np.zeros((1, 3))
+            self.stick_quat = np.zeros((1, 4))
+            self.stick_rpy = np.zeros((1, 3))
         self.pos = np.zeros((self.NUM_DRONES, 3))
         self.quat = np.zeros((self.NUM_DRONES, 4))
         self.rpy = np.zeros((self.NUM_DRONES, 3))
@@ -487,6 +583,9 @@ class BaseAviary(gym.Env):
         and improve performance (at the expense of memory).
 
         """
+        if self.ADD_STICK:
+            self.stick_pos[0], self.stick_quat[0] = p.getBasePositionAndOrientation(self.STICK_ID, physicsClientId=self.CLIENT)
+        self.stick_rpy[0] = p.getEulerFromQuaternion(self.stick_quat[0])
         for i in range (self.NUM_DRONES):
             self.pos[i], self.quat[i] = p.getBasePositionAndOrientation(self.DRONE_IDS[i], physicsClientId=self.CLIENT)
             self.rpy[i] = p.getEulerFromQuaternion(self.quat[i])
@@ -502,8 +601,10 @@ class BaseAviary(gym.Env):
 
         """
         if self.RECORD and self.GUI:
+            path = os.path.join(self.OUTPUT_FOLDER, "recording_" + datetime.now().strftime("%m.%d.%Y_%H.%M.%S"), "output.mp4")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             self.VIDEO_ID = p.startStateLogging(loggingType=p.STATE_LOGGING_VIDEO_MP4,
-                                                fileName=os.path.join(self.OUTPUT_FOLDER, "recording_" + datetime.now().strftime("%m.%d.%Y_%H.%M.%S"), "output.mp4"),
+                                                fileName=path,
                                                 physicsClientId=self.CLIENT
                                                 )
         if self.RECORD and not self.GUI:
@@ -534,6 +635,20 @@ class BaseAviary(gym.Env):
         state = np.hstack([self.pos[nth_drone, :], self.quat[nth_drone, :], self.rpy[nth_drone, :],
                            self.vel[nth_drone, :], self.ang_v[nth_drone, :], self.last_clipped_action[nth_drone, :]])
         return state.reshape(20,)
+
+    ################################################################################
+    
+    def _getLastError(self):
+        return self.last_error_e
+    
+    def _resetLastError(self):
+        self.last_error_e *= 0
+
+    ################################################################################
+
+    def _getStickStateVector(self):
+        state = np.hstack([self.stick_pos[:], self.stick_rpy[:]])
+        return state.reshape(6,)
 
     ################################################################################
 
@@ -653,7 +768,8 @@ class BaseAviary(gym.Env):
     
     def _physics(self,
                  rpm,
-                 nth_drone
+                 nth_drone,
+                 disturbance=None
                  ):
         """Base PyBullet physics implementation.
 
@@ -682,6 +798,14 @@ class BaseAviary(gym.Env):
                               flags=p.LINK_FRAME,
                               physicsClientId=self.CLIENT
                               )
+        if disturbance is not None:
+            p.applyExternalForce(self.DRONE_IDS[nth_drone],
+                                    -1,
+                                    forceObj=disturbance,
+                                    posObj=[0, 0, 0],
+                                    flags=p.LINK_FRAME,
+                                    physicsClientId=self.CLIENT
+                                    )
 
     ################################################################################
 

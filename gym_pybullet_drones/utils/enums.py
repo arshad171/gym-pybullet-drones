@@ -13,6 +13,8 @@ class Physics(Enum):
     """Physics implementations enumeration class."""
 
     PYB = "pyb"                         # Base PyBullet physics update
+    PYB_PID_OL = "pyb_pid_ol"                 # Base PyBullet physics update and run pid actions
+    PYB_PID_CL = "pyb_pid_cl"                 # Base PyBullet physics update and run pid actions
     DYN = "dyn"                         # Update with an explicit model of the dynamics
     PYB_GND = "pyb_gnd"                 # PyBullet physics update with ground effect
     PYB_DRAG = "pyb_drag"               # PyBullet physics update with drag

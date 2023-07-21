@@ -85,6 +85,34 @@
     <child link="prop3_link"/>
   </joint>
 
+  <!-- <link name="top">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0.025"/>
+      <geometry>
+        <cylinder length="0.005" radius="0.05" />
+      </geometry>
+      <material name="red">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.025"/>
+      <geometry>
+        <cylinder length="0.005" radius="0.05" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0.025"/>
+      <mass value="0.005"/>
+      <inertia ixx="3.1416666666666666e-06" ixy="0.0" ixz="0.0" iyy="3.1416666666666666e-06" iyz="0.0" izz="6.2625000000000003e-06"/>
+    </inertial>
+  </link>
+
+  <joint name="top_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="top" />
+  </joint> -->
+
   <link name="center_of_mass_link">
     <inertial>
       <origin rpy="0 0 0" xyz="0 0 0"/>
@@ -98,4 +126,3 @@
   </joint>
 
 </robot>
-

@@ -15,6 +15,8 @@ class ActionType(Enum):
     RPM = "rpm"                 # RPMS
     DYN = "dyn"                 # Desired thrust and torques
     PID = "pid"                 # PID control
+    PID_VEL = "pid_vel"                 # PID control
+    PID_BAL = "pid_bal"         # PID control
     VEL = "vel"                 # Velocity input (using PID control)
     TUN = "tun"                 # Tune the coefficients of a PID controller
     ONE_D_RPM = "one_d_rpm"     # 1D (identical input to all motors) with RPMs
@@ -26,6 +28,8 @@ class ActionType(Enum):
 class ObservationType(Enum):
     """Observation type enumeration class."""
     KIN = "kin"     # Kinematic information (pose, linear and angular velocities)
+    KIN_BAL = "kin_bal"     # Kinematic information (pose, linear and angular velocities)
+    KIN_ERR = "kin_err"     # Kinematic information (pose, linear and angular velocities)
     RGB = "rgb"     # RGB camera capture in each drone's POV
 
 ################################################################################
@@ -84,7 +88,7 @@ class BaseSingleAgentAviary(BaseAviary):
         self.ACT_TYPE = act
         self.EPISODE_LEN_SEC = 5
         #### Create integrated controllers #########################
-        if act in [ActionType.PID, ActionType.VEL, ActionType.TUN, ActionType.ONE_D_PID]:
+        if act in [ActionType.PID, ActionType.PID_VEL, ActionType.PID_BAL, ActionType.VEL, ActionType.TUN, ActionType.ONE_D_PID]:
             os.environ['KMP_DUPLICATE_LIB_OK']='True'
             if drone_model in [DroneModel.CF2X, DroneModel.CF2P]:
                 self.ctrl = DSLPIDControl(drone_model=DroneModel.CF2X)
@@ -178,6 +182,10 @@ class BaseSingleAgentAviary(BaseAviary):
             size = 4
         elif self.ACT_TYPE == ActionType.PID:
             size = 3
+        elif self.ACT_TYPE == ActionType.PID_VEL:
+            size = 4
+        elif self.ACT_TYPE == ActionType.PID_BAL:
+            size = 4
         elif self.ACT_TYPE in [ActionType.ONE_D_RPM, ActionType.ONE_D_DYN, ActionType.ONE_D_PID]:
             size = 1
         else:
@@ -246,6 +254,25 @@ class BaseSingleAgentAviary(BaseAviary):
                                                  cur_vel=state[10:13],
                                                  cur_ang_vel=state[13:16],
                                                  target_pos=state[0:3]+0.1*action
+                                                 )
+            return rpm
+        elif self.ACT_TYPE == ActionType.PID_VEL:
+            return action
+        elif self.ACT_TYPE == ActionType.PID_BAL:
+            # action[0:3] = 0.05 * action[0:3]
+            # action[3:] = 0.1 * action[3:]
+
+            # return action
+
+            # dummy return
+            state = self._getDroneStateVector(0)
+            rpm, _, _ = self.ctrl.computeControl(control_timestep=self.AGGR_PHY_STEPS*self.TIMESTEP, 
+                                                 cur_pos=state[0:3],
+                                                 cur_quat=state[3:7],
+                                                 cur_vel=state[10:13],
+                                                 cur_ang_vel=state[13:16],
+                                                 target_pos=state[0:3]+0.025*action[0:3],
+                                                 target_vel=0.1*(action[3]+1)
                                                  )
             return rpm
         elif self.ACT_TYPE == ActionType.VEL:
@@ -324,6 +351,17 @@ class BaseSingleAgentAviary(BaseAviary):
                               dtype=np.float32
                               )
             ############################################################
+        elif self.OBS_TYPE == ObservationType.KIN_BAL:
+            # drone, stick
+            return spaces.Box(low=np.array([-1,-1,0, -1,-1,-1, -1,-1,-1, -1,-1,-1, -1,-1,-1, -1,-1,-1]),
+                              high=np.array([1,1,1, 1,1,1, 1,1,1, 1,1,1, 1,1,1, 1,1,1]),
+                              dtype=np.float32
+                              )
+        elif self.OBS_TYPE == ObservationType.KIN_ERR:
+            return spaces.Box(low=np.array([-1,-1,0, -1,-1,-1, -1,-1,-1, -1,-1,-1, -1,-1,-1]),
+                              high=np.array([1,1,1, 1,1,1, 1,1,1, 1,1,1, 1,1,1]),
+                              dtype=np.float32
+                              )
         else:
             print("[ERROR] in BaseSingleAgentAviary._observationSpace()")
     
@@ -359,6 +397,20 @@ class BaseSingleAgentAviary(BaseAviary):
             ############################################################
             #### OBS SPACE OF SIZE 12
             ret = np.hstack([obs[0:3], obs[7:10], obs[10:13], obs[13:16]]).reshape(12,)
+            return ret.astype('float32')
+            ############################################################
+        elif self.OBS_TYPE == ObservationType.KIN_BAL: 
+            obs = self._clipAndNormalizeState(self._getDroneStateVector(0))
+            obs_stick = self._clipAndNormalizeStickState(self._getStickStateVector())
+            ret = np.hstack([obs[0:3], obs[7:10], obs[10:13], obs[13:16], obs_stick[0:6]]).reshape(18,)
+            return ret.astype('float32')
+        elif self.OBS_TYPE == ObservationType.KIN_ERR: 
+            obs = self._clipAndNormalizeState(self._getDroneStateVector(0))
+            # error: get the last state and action
+            # compute error: s' - (s + a)
+            error = obs[0:3] - (self.last_state_e[0:3] + self.last_action_e[0:3])
+            self.last_error_e = error + 0.5 * self.last_error_e
+            ret = np.hstack([obs[0:3], obs[7:10], obs[10:13], obs[13:16], self.last_error_e]).reshape(15,)
             return ret.astype('float32')
             ############################################################
         else:
