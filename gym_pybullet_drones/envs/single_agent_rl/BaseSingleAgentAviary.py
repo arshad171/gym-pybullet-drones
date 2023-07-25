@@ -49,7 +49,8 @@ class BaseSingleAgentAviary(BaseAviary):
                  gui=False,
                  record=False, 
                  obs: ObservationType=ObservationType.KIN,
-                 act: ActionType=ActionType.RPM
+                 act: ActionType=ActionType.RPM,
+                 output_folder: str="results",
                  ):
         """Initialization of a generic single agent RL environment.
 
@@ -122,7 +123,8 @@ class BaseSingleAgentAviary(BaseAviary):
                          obstacles=True, # Add obstacles for RGB observations and/or FlyThruGate
                          user_debug_gui=False, # Remove of RPM sliders from all single agent learning aviaries
                          vision_attributes=vision_attributes,
-                         dynamics_attributes=dynamics_attributes
+                         dynamics_attributes=dynamics_attributes,
+                         output_folder=output_folder,
                          )
         #### Set a limit on the maximum target speed ###############
         if act == ActionType.VEL:
