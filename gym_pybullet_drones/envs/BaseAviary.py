@@ -379,9 +379,12 @@ class BaseAviary(gym.Env):
 
                     action[0:3] = 0.05 * action[0:3]
 
-                    # [-1, 1] => [0, 2] => [0, 1] => [0, 0.5]
-                    action[3] = (action[3] + 1) * 0.5 * 0.5
-                    target_vel = action[3] * (np.abs(action[0:3]) > 0.001) * np.sign(action[0:3])
+                    if self.ACT_TYPE.value == "pid_vel":
+                        # [-1, 1] => [0, 2] => [0, 1] => [0, 0.5]
+                        action[3] = (action[3] + 1) * 0.5 * 0.5
+                        target_vel = action[3] * (np.abs(action[0:3]) > 0.001) * np.sign(action[0:3])
+                    else:
+                        target_vel = np.zeros(3)
 
                     drone_state = self._getDroneStateVector(0)
                     target_pos = np.array(drone_state[0:3]+action[0:3])
@@ -643,6 +646,9 @@ class BaseAviary(gym.Env):
     
     def _resetLastError(self):
         self.last_error_e *= 0
+
+    def _getLastAction(self):
+        return self.last_action_e
 
     ################################################################################
 
