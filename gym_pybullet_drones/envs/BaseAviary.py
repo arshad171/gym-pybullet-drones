@@ -647,6 +647,10 @@ class BaseAviary(gym.Env):
     def _resetLastError(self):
         self.last_error_e *= 0
 
+    def _resetLastAction(self):
+        self.last_state_e *= 0
+        self.last_action_e *= 0
+
     def _getLastAction(self):
         return self.last_action_e
 
